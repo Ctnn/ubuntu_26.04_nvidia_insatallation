@@ -1,67 +1,91 @@
-# Ubuntu 26.04 LTS (Resolute Raccoon) — Kurulum Rehberi
+# Ubuntu 26.04 LTS (Resolute Raccoon) — NVIDIA AI Stack Kurulum Rehberi
+
+Kapsam: NVIDIA driver, CUDA, cuDNN ve TensorRT kurulumu. RTX 5070 Ti Mobile üzerinde test edilmiştir.
 
 ## Sistem Bilgisi
 
 | Bileşen | Detay |
 |---|---|
 | OS | Ubuntu 26.04 LTS (Resolute Raccoon) |
-| GPU | NVIDIA GeForce RTX 5070 Ti Mobile |
+| Kernel | Linux 7.x |
+| GPU | NVIDIA GeForce RTX 5070 Ti Mobile (GB205M) |
 | iGPU | AMD Radeon Graphics (Granite Ridge) |
-| WiFi | MediaTek MT7922 |
+| CPU | AMD Ryzen (Raphael/Granite Ridge) |
+| WiFi | MediaTek MT7922 802.11ax |
 | Ethernet | Realtek RTL8125 2.5GbE |
 
 ---
 
-## 1. Node.js ve Claude Code
+## 1. Temel Araçlar
 
-### nvm Kurulumu
+### git
+
+```bash
+sudo apt install -y git
+git config --global user.name "Kullanici Adi"
+git config --global user.email "email@example.com"
+```
+
+### GitHub CLI ve SSH
+
+```bash
+sudo apt install -y gh
+```
+
+SSH key oluştur ve GitHub'a ekle:
+
+```bash
+ssh-keygen -t ed25519 -C "email@example.com" -f ~/.ssh/id_ed25519 -N ""
+ssh-keyscan github.com >> ~/.ssh/known_hosts
+cat ~/.ssh/id_ed25519.pub   # Bu çıktıyı GitHub > Settings > SSH keys'e ekle
+```
+
+Bağlantıyı test et:
+
+```bash
+ssh -T git@github.com
+# Hi <kullanici>! You've successfully authenticated...
+```
+
+### Node.js (nvm ile)
 
 ```bash
 curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
 source ~/.bashrc
-```
-
-### Node.js (LTS) Kurulumu
-
-```bash
 nvm install --lts
 node --version   # v24.16.0
-npm --version    # 11.13.0
 ```
-
-### Claude Code Kurulumu
-
-```bash
-npm install -g @anthropic-ai/claude-code
-claude --version
-```
-
-> nvm, gerekli PATH satırlarını otomatik olarak `~/.bashrc`'ye ekler.
 
 ---
 
 ## 2. NVIDIA Driver
 
-Driver zaten Ubuntu 26.04 ile birlikte geldi. Kontrol:
+Ubuntu 26.04, modern NVIDIA GPU'ları için driver'ı kutudan çıkar çıkmaz yükler.
+
+Durumu kontrol et:
 
 ```bash
 nvidia-smi
-# Driver Version: 595.71.05 | CUDA Version: 13.2
+# Driver Version: 595.71.05 | CUDA Version: 13.2 (maks. desteklenen)
 ```
 
-Manuel kurulum gerekirse:
+Eğer driver eksikse:
 
 ```bash
-sudo ubuntu-drivers install
+ubuntu-drivers list              # Önerilen driver'ları listele
+sudo ubuntu-drivers install      # Önerilen driver'ı otomatik kur
 # veya belirli bir versiyon:
 sudo apt install nvidia-driver-595
+sudo reboot
 ```
 
 ---
 
 ## 3. CUDA Toolkit
 
-### Repo Ekleme (Ubuntu 26.04)
+### NVIDIA Repo Ekleme
+
+Ubuntu 26.04 için resmi NVIDIA CUDA reposu mevcut:
 
 ```bash
 wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2604/x86_64/cuda-keyring_1.1-1_all.deb
@@ -69,20 +93,26 @@ sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt update
 ```
 
-> **Not:** NVIDIA'nın ubuntu2604 reposu henüz yoksa ubuntu2404 paketi kullanılabilir:
-> ```bash
-> wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
-> ```
+### Driver-CUDA Versiyon Uyumu
 
-### CUDA Kurulumu
+`nvidia-smi` çıktısındaki `CUDA Version` değeri, driver'ın desteklediği **maksimum** CUDA versiyonudur. Daha yüksek bir CUDA toolkit kurulmamalı.
+
+| Driver Serisi | Maks. CUDA |
+|---|---|
+| 595.x | 13.2 |
+| 570.x | 12.8 |
+| 550.x | 12.4 |
+
+### Kurulum
 
 ```bash
-sudo apt install cuda-toolkit-13-2
-# veya en güncel için:
-sudo apt install cuda-toolkit
+# Uyumlu versiyonu kur (driver 595 → maks. CUDA 13.2 → cuda-toolkit-13-1 güvenli)
+sudo apt install -y cuda-toolkit-13-1
 ```
 
-### PATH Ayarı (`~/.bashrc`'ye ekle)
+### PATH Ayarı
+
+`~/.bashrc` dosyasına ekle:
 
 ```bash
 export PATH=/usr/local/cuda/bin:$PATH
@@ -92,81 +122,144 @@ export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ```bash
 source ~/.bashrc
 nvcc --version
+# Cuda compilation tools, release 13.1
 ```
 
 ---
 
 ## 4. cuDNN
 
-### NVIDIA Repo'dan Kurulum (CUDA repo eklendikten sonra)
+CUDA repo eklendikten sonra apt ile kurulur:
 
 ```bash
-sudo apt install cudnn
-# veya spesifik versiyon:
-sudo apt install cudnn9-cuda-13
+sudo apt install -y nvidia-cudnn
 ```
 
-### Doğrulama
+Kurulumu doğrula:
 
 ```bash
 dpkg -l | grep cudnn
+# nvidia-cudnn  9.0.0.312~cuda12build1
 ```
 
 ---
 
 ## 5. TensorRT
 
-### Repo'dan Kurulum
+### Önemli Not: Python Versiyon Kısıtlaması
+
+TensorRT'nin PyPI paketi yalnızca **Python 3.8–3.12** destekler. Ubuntu 26.04 varsayılan Python'u 3.14 olduğundan Python 3.12 ayrıca kurulmalıdır.
+
+### Python 3.12 Kurulumu (deadsnakes PPA)
 
 ```bash
-sudo apt install tensorrt
+sudo add-apt-repository ppa:deadsnakes/ppa -y
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3.12-dev
+python3.12 --version   # Python 3.12.x
 ```
 
-### Python Binding'leri (isteğe bağlı)
+### TensorRT Sanal Ortamı
 
 ```bash
-sudo apt install python3-libnvinfer python3-libnvinfer-dev
+python3.12 -m venv ~/venvs/tensorrt
+source ~/venvs/tensorrt/bin/activate
+pip install tensorrt==10.16.1.11
+```
+
+### LD_LIBRARY_PATH Ayarı
+
+TensorRT'nin kütüphaneleri venv içinde bulunur, sisteme tanıtılması gerekir. `~/.bashrc` dosyasına ekle:
+
+```bash
+export LD_LIBRARY_PATH=/home/$USER/venvs/tensorrt/lib/python3.12/site-packages/tensorrt_libs:$LD_LIBRARY_PATH
 ```
 
 ### Doğrulama
 
 ```bash
-dpkg -l | grep -i tensorrt
-python3 -c "import tensorrt; print(tensorrt.__version__)"
+source ~/venvs/tensorrt/bin/activate
+python -c "import tensorrt; print('TensorRT:', tensorrt.__version__)"
+# TensorRT: 10.16.1.11
 ```
 
 ---
 
-## 6. Sürücü Durumu Özeti
+## 6. Sürücü ve Donanım Durumu
 
-Tüm sürücüler kutu açık çalışıyor:
+Tüm bileşenler Ubuntu 26.04'te kutu açık çalışıyor:
 
-| Bileşen | Driver | Durum |
+| Bileşen | Driver | Modül |
 |---|---|---|
-| RTX 5070 Ti Mobile | nvidia 595.71.05 | ✅ |
-| AMD Radeon iGPU | amdgpu (kernel) | ✅ |
-| WiFi MT7922 | mt7921e (kernel) | ✅ |
-| Ethernet RTL8125 | r8169 (kernel) | ✅ |
-| Dahili Ses | snd_hda_intel / SN6140 | ✅ |
-| Razer Barracuda X 2.4 | USB Audio | ✅ |
+| RTX 5070 Ti Mobile | nvidia 595.71.05 | nvidia, nvidia_drm |
+| AMD Radeon iGPU | kernel built-in | amdgpu |
+| WiFi MT7922 | kernel built-in | mt7921e |
+| Ethernet RTL8125 | kernel built-in | r8169 |
+| Dahili Ses (SN6140) | kernel built-in | snd_hda_intel |
+| HDMI Ses | kernel built-in | snd_hda_intel |
 
 ---
 
-## 7. Faydalı Komutlar
+## 7. Kurulum Özeti ve Versiyon Tablosu
+
+| Paket | Versiyon | Yöntem |
+|---|---|---|
+| NVIDIA Driver | 595.71.05 | ubuntu-drivers / apt |
+| CUDA Toolkit | 13.1 | apt (NVIDIA repo) |
+| cuDNN | 9.0.0 | apt (NVIDIA repo) |
+| TensorRT | 10.16.1.11 | pip (Python 3.12 venv) |
+| Python (AI stack) | 3.12.13 | deadsnakes PPA |
+
+---
+
+## 8. Faydalı Komutlar
 
 ```bash
-# GPU durumu
+# GPU ve driver durumu
 nvidia-smi
 
-# CUDA versiyonu
+# CUDA derleyici versiyonu
 nvcc --version
 
-# Kurulu paket kontrolü
-dpkg -l | grep -E "cuda|cudnn|tensorrt"
+# Kurulu AI paketleri
+dpkg -l | grep -E "cuda|cudnn|nvidia"
 
-# Önerilen driver listesi
-ubuntu-drivers list
+# TensorRT versiyon kontrolü
+source ~/venvs/tensorrt/bin/activate && python -c "import tensorrt; print(tensorrt.__version__)"
 
 # Kernel modülleri
-lsmod | grep nvidia
+lsmod | grep -E "nvidia|amdgpu"
+
+# Aktif ses cihazları
+aplay -l
+
+# Network durumu
+nmcli device status
+```
+
+---
+
+## 9. Bilinen Sorunlar ve Çözümler
+
+**TensorRT import hatası: `No module named 'tensorrt'`**
+Venv'in Python 3.12 ile oluşturulduğundan emin ol. Python 3.14 ile oluşturulmuş venv'lerde binding paketi kurulmaz.
+
+```bash
+rm -rf ~/venvs/tensorrt
+python3.12 -m venv ~/venvs/tensorrt
+```
+
+**`nvcc: command not found`**
+CUDA PATH'i `~/.bashrc`'ye eklenmemiş. Kontrol et:
+
+```bash
+echo $PATH | grep cuda
+export PATH=/usr/local/cuda/bin:$PATH
+```
+
+**SSH bağlantısı: `Host key verification failed`**
+GitHub'un host key'ini known_hosts'a ekle:
+
+```bash
+ssh-keyscan github.com >> ~/.ssh/known_hosts
 ```
